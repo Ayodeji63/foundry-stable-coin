@@ -181,4 +181,22 @@ contract DSCEngineTest is Test {
     ///////////////////////////////////
     // redeemCollateral Tests //
     //////////////////////////////////
+
+    function testRevertsIfRedeemAmountIsZero() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, AMOUNT_TO_MINT);
+        vm.expectRevert(DSCEngine.DSCEngine__NeedMoreThanZero.selector);
+        dsce.redeemCollateral(weth, 0);
+        vm.stopPrank();
+    }
+
+    function testCanRedeemCollateral() public depositedColateral {
+        vm.startPrank(USER);
+        dsce.redeemCollateral(weth, AMOUNT_COLLATERAL);
+        uint256 userBalance = ERC20Mock(weth).balanceOf(USER);
+        console.log(userBalance);
+        assertEq(userBalance, AMOUNT_COLLATERAL);
+        vm.stopPrank();
+    }
 }
