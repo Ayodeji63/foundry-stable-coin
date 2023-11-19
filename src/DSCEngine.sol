@@ -376,4 +376,8 @@ contract DSCEngine is ReentrancyGuard {
     function getPrecision() public pure returns (uint256) {
         return PRECISON;
     }
+
+    function getHealthFactor(address user) external view returns (uint256) {
+        return _healthFactor(user);
+    }
 }

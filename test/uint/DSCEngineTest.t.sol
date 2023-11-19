@@ -24,6 +24,10 @@ contract DSCEngineTest is Test {
     uint256 public constant STARTING_ERC20_BALANCE = 10 ether;
     uint256 public constant AMOUNT_TO_MINT = 100 ether;
 
+    event CollateralRedeemed(
+        address indexed redeemedFrom, address indexed redeemedTo, address indexed token, uint256 amount
+    );
+
     function setUp() public {
         deployer = new DeployDSC();
         (dsc, dsce, config) = deployer.run();
@@ -198,5 +202,67 @@ contract DSCEngineTest is Test {
         console.log(userBalance);
         assertEq(userBalance, AMOUNT_COLLATERAL);
         vm.stopPrank();
+    }
+
+    function testEmitCollateralRedeemedWithCorrectArgs() public depositedColateral {
+        vm.expectEmit(true, true, true, true, address(dsce));
+        emit CollateralRedeemed(USER, USER, weth, AMOUNT_COLLATERAL);
+        vm.startPrank(USER);
+        dsce.redeemCollateral(weth, AMOUNT_COLLATERAL);
+        vm.stopPrank();
+    }
+
+    ///////////////////////////////////
+    // redeemCollateralForDsc Tests //
+    //////////////////////////////////
+
+    function testMustRedeemMoreThanZero() public depositedCollateralAndMintedDsc {
+        vm.startPrank(USER);
+        dsc.approve(address(dsce), AMOUNT_TO_MINT);
+        vm.expectRevert(DSCEngine.DSCEngine__NeedMoreThanZero.selector);
+        dsce.redeemCollateralForDsc(weth, 0, AMOUNT_TO_MINT);
+        vm.stopPrank();
+    }
+
+    function testCanRedeemDepositedCollateral() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, AMOUNT_TO_MINT);
+        dsc.approve(address(dsce), AMOUNT_TO_MINT);
+        dsce.redeemCollateralForDsc(weth, AMOUNT_COLLATERAL, AMOUNT_TO_MINT);
+        vm.stopPrank();
+
+        uint256 userBalance = dsc.balanceOf(USER);
+        assertEq(userBalance, 0);
+    }
+
+    ////////////////////////
+    // healthFactor Tests //
+    ////////////////////////
+
+    function testProperlyReportsHealthFactor() public depositedCollateralAndMintedDsc {
+        uint256 expectedHealthFactor = 100 ether;
+        uint256 healthFactor = dsce.getHealthFactor(USER);
+
+        //? $100 minted with $20,000 collateral at 50% liquidation threshold
+        //! means that we must have $200 collateral at all times.
+        //? 20,000 * 0.5 = 10,000
+        //? 10,000 / 100 = 100 health factor
+
+        assertEq(healthFactor, expectedHealthFactor);
+    }
+
+    function testHealthFactorCanGoBeBelowOne() public depositedCollateralAndMintedDsc {
+        int256 ethUsdUpdatedPrice = 18e8;
+
+        //? 1 ETH = $18
+        //? Rememeber, we need $200 at all times if we have $100 of debt
+
+        MockV3Aggregator(wethUsdPriceFeed).updateAnswer(ethUsdUpdatedPrice);
+
+        uint256 userHealthFactor = dsce.getHealthFactor(USER);
+
+        //? 180*50 (LIQUIDATION_THRESHOLD) / 100 (LIQUIDATION_PRECISION) / 100 (PRECISION) = 90 / 100 (totalDscMinted) = 0.9
+        assert(userHealthFactor == 0.9 ether);
     }
 }
