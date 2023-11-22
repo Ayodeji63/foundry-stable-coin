@@ -11,6 +11,10 @@ import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import {MockV3Aggregator} from "../mocks/MockV3Aggregator.sol";
 
 contract DSCEngineTest is Test {
+    event CollateralRedeemed(
+        address indexed redeemedFrom, address indexed redeemedTo, address indexed token, uint256 amount
+    );
+
     DeployDSC deployer;
     DecentralizedStableCoin dsc;
     DSCEngine dsce;
@@ -24,9 +28,9 @@ contract DSCEngineTest is Test {
     uint256 public constant STARTING_ERC20_BALANCE = 10 ether;
     uint256 public constant AMOUNT_TO_MINT = 100 ether;
 
-    event CollateralRedeemed(
-        address indexed redeemedFrom, address indexed redeemedTo, address indexed token, uint256 amount
-    );
+    // Liquidation
+    address public LIQUIDATOR = makeAddr("liquidator");
+    uint256 public COLLATERAL_TO_COVER = 20 ether;
 
     function setUp() public {
         deployer = new DeployDSC();
@@ -264,5 +268,56 @@ contract DSCEngineTest is Test {
 
         //? 180*50 (LIQUIDATION_THRESHOLD) / 100 (LIQUIDATION_PRECISION) / 100 (PRECISION) = 90 / 100 (totalDscMinted) = 0.9
         assert(userHealthFactor == 0.9 ether);
+    }
+
+    ///////////////////////
+    // Liquidation Tests //
+    ///////////////////////
+
+    function testCantLiquidateGoodHealthFactor() public depositedCollateralAndMintedDsc {
+        ERC20Mock(weth).mint(LIQUIDATOR, COLLATERAL_TO_COVER);
+
+        vm.startPrank(LIQUIDATOR);
+        ERC20Mock(weth).approve(address(dsce), COLLATERAL_TO_COVER);
+        dsce.depositCollateralAndMintDsc(weth, COLLATERAL_TO_COVER, AMOUNT_TO_MINT);
+        dsc.approve(address(dsce), AMOUNT_TO_MINT);
+
+        vm.expectRevert(DSCEngine.DSCEngine__HealthFactorOk.selector);
+        dsce.liquidate(weth, USER, AMOUNT_TO_MINT);
+        vm.stopPrank();
+    }
+
+    modifier liquidated() {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, AMOUNT_TO_MINT);
+        vm.stopPrank();
+        int256 ethUsdUpdatedPrice = 18e8; //? 1ETH = $18
+
+        MockV3Aggregator(wethUsdPriceFeed).updateAnswer(ethUsdUpdatedPrice);
+        uint256 userHealthFactor = dsce.getHealthFactor(USER);
+
+        ERC20Mock(weth).mint(LIQUIDATOR, COLLATERAL_TO_COVER);
+
+        vm.startPrank(LIQUIDATOR);
+        ERC20Mock(weth).approve(address(dsce), COLLATERAL_TO_COVER);
+        dsce.depositCollateralAndMintDsc(weth, COLLATERAL_TO_COVER, AMOUNT_TO_MINT);
+        dsc.approve(address(dsce), AMOUNT_TO_MINT);
+        dsce.liquidate(weth, USER, AMOUNT_TO_MINT); // We are covering their whole debt
+        vm.stopPrank();
+        _;
+    }
+
+    function testUserStillHasSomeEthAfterLiquidation() public liquidated {
+        // Get how much WETH the user lost
+        uint256 amountLiquidated = dsce.getTokenAmountFromUsd(weth, AMOUNT_TO_MINT)
+            + (dsce.getTokenAmountFromUsd(weth, AMOUNT_TO_MINT) / dsce.getLiquidationBonus());
+        uint256 usdAmountLiquidated = dsce.getUsdValue(weth, amountLiquidated);
+        uint256 expectedUserCollateralValueInUsd = dsce.getUsdValue(weth, AMOUNT_COLLATERAL) - (usdAmountLiquidated);
+
+        (, uint256 userCollateralValueInUsd) = dsce.getAccountInformation(USER);
+        uint256 hardCodedExpectedValue = 70000000000000000020;
+        assertEq(userCollateralValueInUsd, expectedUserCollateralValueInUsd);
+        assertEq(userCollateralValueInUsd, hardCodedExpectedValue);
     }
 }

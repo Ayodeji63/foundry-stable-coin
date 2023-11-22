@@ -6,3 +6,5 @@
 3. Collateral: Exogenous (Crypto)
     1. ETH
     2. BTC# foundry-stable-coin
+
+1. What are our invariants/properties
