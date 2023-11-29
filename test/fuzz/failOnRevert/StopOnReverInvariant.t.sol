@@ -43,11 +43,19 @@ contract InvariantTest is StdInvariant, Test {
         uint256 totalBtcDeposidted = IERC20(wbtc).balanceOf(address(dsce));
         uint256 wethValue = dsce.getUsdValue(weth, totalWethDeposited);
         uint256 wbtcValue = dsce.getUsdValue(weth, totalBtcDeposidted);
+
+        assert(wethValue + wbtcValue >= totalSupply);
         console.log("wet value: ", wethValue);
         console.log("wbtc value: ", wbtcValue);
         console.log("total supply: ", totalSupply);
         console.log("Times mint called: ", handler.timesMintIsCalled());
+    }
 
-        assert(wethValue + wbtcValue >= totalSupply);
+    function invariant_gettersShouldNotRevert() public view {
+        dsce.getLiquidationBonus();
+        dsce.getPrecision();
+        dsce.getAdditionalFeedPrecision();
+        dsce.getCollateralTokens();
+        dsce.getHealthFactor();
     }
 }
